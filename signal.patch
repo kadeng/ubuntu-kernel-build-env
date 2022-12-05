@@ -1,0 +1,63 @@
+diff --git a/kernel/signal.c b/kernel/signal.c
+index dfcee3888b00..5ede28be696c 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1214,17 +1214,24 @@ static int send_signal(int sig, struct kernel_siginfo *info, struct task_struct
+ {
+ 	/* Should SIGKILL or SIGSTOP be received by a pid namespace init? */
+ 	bool force = false;
+-
++	int stype = 0;
++	int info_sender_pid = 0;
++	pid_t sender_pid = -1;
++	pid_t target_pid = -1;
++	int interrupt_ctx = (int) in_interrupt();
+ 	if (info == SEND_SIG_NOINFO) {
+ 		/* Force if sent from an ancestor pid namespace */
+ 		force = !task_pid_nr_ns(current, task_active_pid_ns(t));
++		stype = 1;
++
+ 	} else if (info == SEND_SIG_PRIV) {
+ 		/* Don't ignore kernel generated signals */
+ 		force = true;
++		stype = 2;
+ 	} else if (has_si_pid_and_uid(info)) {
+ 		/* SIGKILL and SIGSTOP is special or has ids */
+ 		struct user_namespace *t_user_ns;
+-
++		
+ 		rcu_read_lock();
+ 		t_user_ns = task_cred_xxx(t, user_ns);
+ 		if (current_user_ns() != t_user_ns) {
+@@ -1235,12 +1242,30 @@ static int send_signal(int sig, struct kernel_siginfo *info, struct task_struct
+ 
+ 		/* A kernel generated signal? */
+ 		force = (info->si_code == SI_KERNEL);
+-
++		stype = 3;
+ 		/* From an ancestor pid namespace? */
+ 		if (!task_pid_nr_ns(current, task_active_pid_ns(t))) {
+ 			info->si_pid = 0;
++			info_sender_pid = 0;
+ 			force = true;
++			stype = 4;
++		}
++	}
++	if (sig==SIGKILL || sig==SIGINT || sig==SIGQUIT || sig==SIGTERM) {
++		if (current!=NULL && !in_interrupt()) {
++			sender_pid = task_pid_nr_ns(current, task_active_pid_ns(current));
++			if (!task_pid_nr_ns(current, task_active_pid_ns(t))) {
++				info_sender_pid = 0;
++			} else {
++				info_sender_pid = sender_pid;
++			}
+ 		}
++		if (t!=NULL) {
++			target_pid = task_pid_nr_ns(t, task_active_pid_ns(t));
++		}		
++		pr_info("send_signal( SIGNAL=%d, in_interrupt=%d sender_pid=%d, info_sender_pid=%d, target pid=%d, pidtype=%d, sigtype=%d, force=%d )", 
++				sig, interrupt_ctx, sender_pid, info_sender_pid, target_pid, type,  stype, (int) force);
++		
+ 	}
+ 	return __send_signal(sig, info, t, type, force);
+ }
